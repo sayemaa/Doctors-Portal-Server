@@ -20,6 +20,7 @@ async function run() {
         const serviceCollection = client.db('doctors_portal').collection('services');
         const bookingCollection = client.db('doctors_portal').collection('bookings');
 
+
         app.get('/service', async (req, res) => {
             const query = {};
             const cursor = serviceCollection.find(query);
@@ -27,6 +28,36 @@ async function run() {
             res.send(services);
         })
 
+        // WARNING  
+        // This is not the proper way to query 
+        // After learning more about mongodb, use aggregate lookup, pipeline, match, group
+        app.get('/available', async (req, res) => {
+            const date = req.query.date;
+
+            // step 1: get all services
+            const services = await serviceCollection.find().toArray();
+
+            //step 2: get the bookings of that day. Output: [{}, {}, {}, {}, {}, {}]
+            const query = { date: date };
+            const bookings = await bookingCollection.find(query).toArray();
+
+            // step 3: for each service
+            services.forEach(service => {
+                // step 4: find bookings for that service. Output: [{}, {}, {}, {}]
+                const serviceBookings = bookings.filter(book => book.treatment === service.name);
+
+                // step 5: select slots for the service bookings: ['', '', '', '']
+                const bookedSlots = serviceBookings.map(book => book.slot);
+
+                // step 6: select those slots that are not in bookedSlots
+                const available = service.slots.filter(slot => !bookedSlots.includes(slot));
+
+                // step 7: set available to slots to make it easier
+                service.slots = available;
+            });
+
+            res.send(services);
+        })
 
         /**
          * API Naming Convention 
