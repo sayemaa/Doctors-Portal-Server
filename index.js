@@ -164,7 +164,11 @@ async function run() {
               Doctors API 
          -----------------------*/
 
-
+        app.post('/doctor', async (req, res) => {
+            const doctor = req.body;
+            const result = await doctorCollection.insertOne(doctor);
+            res.send(result);
+        })
 
     }
     finally {
