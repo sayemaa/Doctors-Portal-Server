@@ -38,14 +38,21 @@ async function run() {
         const serviceCollection = client.db('doctors_portal').collection('services');
         const bookingCollection = client.db('doctors_portal').collection('bookings');
         const userCollection = client.db('doctors_portal').collection('users');
+        const doctorCollection = client.db('doctors_portal').collection('doctors');
 
-
+        /*-------------------
+            Services API
+         --------------------*/
         app.get('/service', async (req, res) => {
             const query = {};
-            const cursor = serviceCollection.find(query);
+            const cursor = serviceCollection.find(query).project({ name: 1 });
             const services = await cursor.toArray();
             res.send(services);
         });
+
+        /*--------------
+            Users API
+         ---------------*/
 
         app.get('/user', verifyJWT, async (req, res) => {
             const users = await userCollection.find().toArray();
@@ -89,6 +96,11 @@ async function run() {
             res.send({ result, token });
         })
 
+
+        /*----------------------
+            Available Slots API
+         -----------------------*/
+
         // WARNING  
         // This is not the proper way to query 
         // After learning more about mongodb, use aggregate lookup, pipeline, match, group
@@ -120,16 +132,9 @@ async function run() {
             res.send(services);
         })
 
-        /**
-         * API Naming Convention 
-         * app.get('/booking') // get all bookings in this collection, or get more than one, or by filter
-         * 
-         * app.get('/booking/:id') // get a specific booking
-         * app.post('/booking') // add a new booking
-         * app.patch('/booking/:id') // 
-         * app.put('/booking/:id') // upsert => update (if exists) or insert (if doesn't exist)
-         * app.delete('/booking/:id') // 
-         */
+        /*--------------------
+            Booked Slots API
+         ---------------------*/
 
         app.get('/booking', verifyJWT, async (req, res) => {
             const patient = req.query.patient;
@@ -153,7 +158,13 @@ async function run() {
             }
             const result = bookingCollection.insertOne(booking);
             return res.send({ success: true, result })
-        })
+        });
+
+        /*----------------------
+              Doctors API 
+         -----------------------*/
+
+
 
     }
     finally {
