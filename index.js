@@ -6,6 +6,9 @@ const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion } = require('mongodb');
 require('dotenv').config();
 
+const nodemailer = require('nodemailer');
+const mg = require('nodemailer-mailgun-transport');
+
 // middleware
 app.use(cors());
 app.use(express.json());
@@ -32,6 +35,46 @@ function verifyJWT(req, res, next) {
     });
 }
 
+const auth = {
+    auth: {
+        api_key: process.env.EMAIL_SENDER_KEY,
+        domain: 'sandbox9dfc742a95b94f75abf1ab3e6c83f880.mailgun.org'
+    },
+};
+
+const nodemailerMailgun = nodemailer.createTransport(mg(auth));
+
+function sendAppointmentEmail(booking) {
+    const { patient, patientName, treatment, date, slot } = booking;
+
+    var email = {
+        from: process.env.EMAIL_SENDER,
+        to: patient,
+        subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+        text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+        html: `
+        <div>
+                <p>Hello ${patientName}, </p>
+                <h3>Your Appointment for ${treatment} is confirmed</h3>
+                <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+
+                <h3>Our Address</h3>
+                <p>Andor Killa Bandorban</p>
+                <p>Bangladesh</p>
+                <a href="https://web.programming-hero.com/">Unsubscribe</a>
+            </div>
+        `,
+    };
+
+    nodemailerMailgun.sendMail(email, (err, info) => {
+        if (err) {
+            console.log(err);
+        }
+        else {
+            console.log('Message sent: ', info);
+        }
+    });
+}
 
 
 async function run() {
@@ -161,12 +204,19 @@ async function run() {
 
         app.post('/booking', async (req, res) => {
             const booking = req.body;
-            const query = { treatment: booking.treatment, date: booking.date, patient: booking.patient }
+            const query =
+            {
+                treatment: booking.treatment,
+                date: booking.date,
+                patient: booking.patient
+            }
             const exists = await bookingCollection.findOne(query);
             if (exists) {
                 return res.send({ success: false, booking: exists })
             }
             const result = bookingCollection.insertOne(booking);
+            console.log("Sending Email")
+            sendAppointmentEmail(booking);
             return res.send({ success: true, result })
         });
 
@@ -200,6 +250,13 @@ async function run() {
 
 run().catch(console.dir);
 
+// FOR TESTING in Postman
+
+// app.post('/email', async (req, res) => {
+//     const booking = req.body;
+//     sendAppointmentEmail(booking);
+//     res.send({ status: true });
+// })
 
 app.get('/', (req, res) => {
     res.send('Running Doctors Portal');
