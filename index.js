@@ -54,8 +54,6 @@ const nodemailerMailgun = nodemailer.createTransport(mg(auth));
 function sendAppointmentEmail(booking) {
     const { patient, patientName, treatment, date, slot } = booking;
 
-
-    // Payment confirmation E-mail
     var email = {
         from: process.env.EMAIL_SENDER,
         to: patient,
@@ -66,6 +64,39 @@ function sendAppointmentEmail(booking) {
                 <p>Hello ${patientName}, </p>
                 <h3>Your Appointment for ${treatment} is confirmed</h3>
                 <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+
+                <h3>Our Address</h3>
+                <p>Andor Killa Bandorban</p>
+                <p>Bangladesh</p>
+                <a href="https://web.programming-hero.com/">Unsubscribe</a>
+            </div>
+        `,
+    };
+
+    nodemailerMailgun.sendMail(email, (err, info) => {
+        if (err) {
+            console.log(err);
+        }
+        else {
+            console.log('Message sent: ', info);
+        }
+    });
+}
+
+// Payment confirmation E-mail
+function sendPaymentConfirmationEmail(booking) {
+    const { patient, patientName, treatment, date, slot } = booking;
+
+    var email = {
+        from: process.env.EMAIL_SENDER,
+        to: patient,
+        subject: `Payment received for ${treatment}`,
+        text: `Your payment for ${treatment} is Confirmed`,
+        html: `
+        <div>
+                <p>Hello ${patientName}, </p>
+                <p>We have successfully received your payment.</p>
+                <h3>Thank you for your cooperation.</h3>
 
                 <h3>Our Address</h3>
                 <p>Andor Killa Bandorban</p>
