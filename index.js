@@ -3,13 +3,17 @@ const cors = require('cors');
 const app = express();
 const jwt = require('jsonwebtoken');
 const port = process.env.PORT || 5000;
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 
+// Nodemailer and Mailgun
 const nodemailer = require('nodemailer');
 const mg = require('nodemailer-mailgun-transport');
 
-// middleware
+// Stripe for PAYMENT
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -35,6 +39,9 @@ function verifyJWT(req, res, next) {
     });
 }
 
+/*--------------
+    Nodemailer
+----------------*/
 const auth = {
     auth: {
         api_key: process.env.EMAIL_SENDER_KEY,
@@ -47,6 +54,8 @@ const nodemailerMailgun = nodemailer.createTransport(mg(auth));
 function sendAppointmentEmail(booking) {
     const { patient, patientName, treatment, date, slot } = booking;
 
+
+    // Payment confirmation E-mail
     var email = {
         from: process.env.EMAIL_SENDER,
         to: patient,
@@ -84,6 +93,7 @@ async function run() {
         const bookingCollection = client.db('doctors_portal').collection('bookings');
         const userCollection = client.db('doctors_portal').collection('users');
         const doctorCollection = client.db('doctors_portal').collection('doctors');
+        const paymentCollection = client.db('doctors_portal').collection('payments');
 
 
         /*-------------------
@@ -103,6 +113,8 @@ async function run() {
         /*-------------------
             Services API
          --------------------*/
+
+        // GET services from mongodb
         app.get('/service', async (req, res) => {
             const query = {};
             const cursor = serviceCollection.find(query).project({ name: 1 });
@@ -110,15 +122,49 @@ async function run() {
             res.send(services);
         });
 
+
+        /*----------------------
+            Available Slots API
+         -----------------------*/
+
+        // Get available slots from mongodb 
+        // (services slots - booked slots = available slots)
+        // WARNING  
+        // This is not the proper way to query 
+        // After learning more about mongodb, use aggregate lookup, pipeline, match, group
+        app.get('/available', async (req, res) => {
+            const date = req.query.date;
+            // step 1: get all services
+            const services = await serviceCollection.find().toArray();
+            //step 2: get the bookings of that day. Output: [{}, {}, {}, {}, {}, {}]
+            const query = { date: date };
+            const bookings = await bookingCollection.find(query).toArray();
+            // step 3: for each service
+            services.forEach(service => {
+                // step 4: find bookings for that service. Output: [{}, {}, {}, {}]
+                const serviceBookings = bookings.filter(book => book.treatment === service.name);
+                // step 5: select slots for the service bookings: ['', '', '', '']
+                const bookedSlots = serviceBookings.map(book => book.slot);
+                // step 6: select those slots that are not in bookedSlots
+                const available = service.slots.filter(slot => !bookedSlots.includes(slot));
+                // step 7: set available to slots to make it easier
+                service.slots = available;
+            });
+
+            res.send(services);
+        })
+
         /*--------------
             Users API
          ---------------*/
 
+        // GET users from db
         app.get('/user', verifyJWT, async (req, res) => {
             const users = await userCollection.find().toArray();
             res.send(users);
         })
 
+        // Check whether the user is admin or not
         app.get('/admin/:email', async (req, res) => {
             const email = req.params.email;
             const user = await userCollection.findOne({ email: email });
@@ -126,6 +172,7 @@ async function run() {
             res.send({ admin: isAdmin })
         })
 
+        // Make an user Admin
         app.put('/user/admin/:email', verifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
             const filter = { email: email };
@@ -136,6 +183,7 @@ async function run() {
             res.send(result);
         })
 
+        // PUT user into db
         app.put('/user/:email', async (req, res) => {
             const email = req.params.email;
             const user = req.body;
@@ -149,46 +197,11 @@ async function run() {
             res.send({ result, token });
         })
 
+        /*-----------------
+            Booking API
+         ------------------*/
 
-        /*----------------------
-            Available Slots API
-         -----------------------*/
-
-        // WARNING  
-        // This is not the proper way to query 
-        // After learning more about mongodb, use aggregate lookup, pipeline, match, group
-        app.get('/available', async (req, res) => {
-            const date = req.query.date;
-
-            // step 1: get all services
-            const services = await serviceCollection.find().toArray();
-
-            //step 2: get the bookings of that day. Output: [{}, {}, {}, {}, {}, {}]
-            const query = { date: date };
-            const bookings = await bookingCollection.find(query).toArray();
-
-            // step 3: for each service
-            services.forEach(service => {
-                // step 4: find bookings for that service. Output: [{}, {}, {}, {}]
-                const serviceBookings = bookings.filter(book => book.treatment === service.name);
-
-                // step 5: select slots for the service bookings: ['', '', '', '']
-                const bookedSlots = serviceBookings.map(book => book.slot);
-
-                // step 6: select those slots that are not in bookedSlots
-                const available = service.slots.filter(slot => !bookedSlots.includes(slot));
-
-                // step 7: set available to slots to make it easier
-                service.slots = available;
-            });
-
-            res.send(services);
-        })
-
-        /*--------------------
-            Booked Slots API
-         ---------------------*/
-
+        // GET bookings from db, query by mail
         app.get('/booking', verifyJWT, async (req, res) => {
             const patient = req.query.patient;
             const decodedEmail = req.decoded.email;
@@ -200,8 +213,17 @@ async function run() {
             else {
                 return res.status(403).send({ message: 'forbidden access' });
             }
+        });
+
+        // GET specific booking by id
+        app.get('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const booking = await bookingCollection.findOne(query);
+            res.send(booking);
         })
 
+        // POST booking into mongodb
         app.post('/booking', async (req, res) => {
             const booking = req.body;
             const query =
@@ -220,21 +242,41 @@ async function run() {
             return res.send({ success: true, result })
         });
 
+        // PATCH bookings data after payment complete
+        app.patch('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId
+                }
+            }
+
+            const result = await paymentCollection.insertOne(payment);
+            const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            res.send(updatedDoc);
+        })
+
         /*----------------------
               Doctors API 
          -----------------------*/
 
+        // GET doctor from db
         app.get('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctors = await doctorCollection.find().toArray();
             res.send(doctors);
         })
 
+        // POST doctor into db
         app.post('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctor = req.body;
             const result = await doctorCollection.insertOne(doctor);
             res.send(result);
         });
 
+        // Delete doctor into db
         app.delete('/doctor/:email', verifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
             const filter = { email: email };
@@ -242,6 +284,18 @@ async function run() {
             res.send(result);
         });
 
+        // stripe POST Api
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const service = req.body;
+            const price = service.price;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            });
+            res.send({ clientSecret: paymentIntent.client_secret })
+        });
     }
     finally {
 
@@ -250,13 +304,13 @@ async function run() {
 
 run().catch(console.dir);
 
-// FOR TESTING in Postman
+// FOR TESTING nodemailer in Postman
 
-// app.post('/email', async (req, res) => {
-//     const booking = req.body;
-//     sendAppointmentEmail(booking);
-//     res.send({ status: true });
-// })
+/* app.post('/email', async (req, res) => {
+     const booking = req.body;
+     sendAppointmentEmail(booking);
+     res.send({ status: true });
+}) */
 
 app.get('/', (req, res) => {
     res.send('Running Doctors Portal');
