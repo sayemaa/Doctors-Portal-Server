@@ -287,6 +287,7 @@ async function run() {
 
             const result = await paymentCollection.insertOne(payment);
             const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            sendPaymentConfirmationEmail(booking);
             res.send(updatedDoc);
         })
 
